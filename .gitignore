@@ -1,0 +1,4 @@
+client-2048.crt
+client-2048.csr
+client-2048.key
+openssl.cnf
