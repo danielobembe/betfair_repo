@@ -15,7 +15,7 @@ class BetBot(object):
         self.logger = None # set by run() function at startup
         self.api = None # set by run() function at startup
         self.abs_path = os.path.abspath(os.path.dirname(__file__))
-        self.ignores_path = '%s/ignores.pkl' % self.abs_path
+        self.ignores_path =   '%s/ignores.pkl' % self.abs_path
         self.ignores = self.unpickle_data(self.ignores_path, []) # list of market ids
         self.betcount_path = '%s/betcount.pkl' % self.abs_path
         self.betcount = self.unpickle_data(self.betcount_path, {}) # keys = hours, vals = market ids
