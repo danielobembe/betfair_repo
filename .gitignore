@@ -6,4 +6,4 @@ venv/
 *.py~
 err_log.txt
 log.txt
-
+.\#*

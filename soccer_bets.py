@@ -19,9 +19,9 @@ class SoccerBot(object):
         self.api = None
         self.abs_path = os.path.abspath(os.path.dirname(__file__))
         self.ignores_path = '%s/ignores.pkl' % self.abs_path
-        # self.ignores = self.unpickle_data(self.ignores_path,[]) #whatitdo?
+        self.ignores = self.unpickle_data(self.ignores_path,[]) #whatitdo?
         self.betcount_path = '%s/betcount.pkl' % self.abs_path
-        # self.betcount = self.unpickle_data(self.betcount_path,{})#{hrs,Mkt_id}
+        self.betcount = self.unpickle_data(self.betcount_path,{})#{hrs,Mkt_id}
         self.throttle = { 'next': time(), #time we can send next request
                           'wait': 1.0,    #time between requests
                           'keep_alive': time(), 
@@ -29,7 +29,22 @@ class SoccerBot(object):
          }
         self.session = False
 
+    def pickle_data(self, filepath='', data = None):
+        '''pickle object to a file'''
+        f = open(filepath, 'wb')
+        pickle.dump(data, f)
+        f.close()
 
+    def unpickle_data(self, filepath='', default_object = None):
+        '''unpickle file to an object, and return object'''
+        if os.path.exists(filepath):
+            f = open(filepath, 'rb')
+            data = pickle.load(f)
+            f.close()
+            return data
+        return default_object #i.e None
+
+        
 #Testing Object Initialization
 USERNAME = login_info['username']
 PASSWORD = login_info['password']
@@ -41,3 +56,5 @@ soccer_bot = SoccerBot()
 print(soccer_bot.abs_path)
 print(soccer_bot.betcount_path)
 print(soccer_bot.throttle)
+print(soccer_bot.betcount)
+print(soccer_bot.ignores)
