@@ -1,2 +1,4 @@
 api-ng-ssl/
 betfair/ssl_certs/
+*config.py*
+venv/

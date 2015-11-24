@@ -2,11 +2,12 @@
 from time import sleep
 import traceback
 from sys import argv, exit
+from login_config import login_info
 
 ### USER INFO ###
-USERNAME = 'username'
-PASSWORD = 'password'
-APP_KEY = 'abcdef123456'
+USERNAME = login_info['username']
+PASSWORD = login_info['password']
+APP_KEY =  login_info['app_key_live']
 
 ### EXCHANGE INFO ###
 # NOTE: launch bot using 'python gubber_ng/manager.py --aus' to use AUS exchange
