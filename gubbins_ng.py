@@ -62,6 +62,7 @@ class BetBot(object):
                     market_ids = self.ignores[i:i+5] # list of upto 5 market ids
                     self.do_throttle()
                     books = self.get_market_books(market_ids)
+                    print(books)
                     for book in books:
                         if book['status'] == 'CLOSED':
                             # remove from ignores
