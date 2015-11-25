@@ -120,14 +120,30 @@ class SoccerBot(object):
     def do_login(self, username='', password=''):
         self.session = False
         resp = self.api.login(username, password)
-        if resp = 'Success':
+        if resp = 'SUCCESS':
             self.session = True
         else:
             self.session = False #login failed
             msg = 'api.login() resp = %s' % resp
             raise Exception(msg)
 
-
+    ''' Refresh login session. Sessions expire after 20 mins
+        Betfair throttle = 1 request every 7 mins
+    '''
+    def keep_alive(self):
+        now = time()
+        if now > self.throttle['keep_alive']:
+            #refresh
+            self.session = False
+            resp = self.api.keep_alive()
+            if resp == 'SUCCESS':
+                self.throttle['keep_alive'] = now + (15 * 60) #add 15 mins
+                self.session = True
+            else:
+                self.session = False
+                msg = 'api.keep_alive() resp = %s' % resp
+                raise Exception(msg)
+        
     #Returns a list of markets"
     def get_markets(self, market_ids=None):
         if market_ids:
@@ -150,21 +166,144 @@ class SoccerBot(object):
                 msg = 'api.get_markets() resp = %s' % markets
                 raise Exception(msg)
 
-    
+    def create_bets(self, markets=None, market_paths=None):
+        market_bets = {}
+        for market in markets:
+            market_id = market['marketId']
+            if market_id in market_paths:
+                bets_index = market_paths[market_id]['bets_index']
+                bets = setings.market_bets[bets_index]
+                #create bets for this market
+                market_path = market_paths[market_id]['market_path']
+                market_bets[market_id] = {'bets': [], 'market_path': market_path}
+                for runner in market['runners']:
+                    for bet in bets:
+                        new_bet = {}
+                        new_bet['selectionId'] = runner['selectionId']
+                        new_bet['side'] = bet['side']
+                        new_bet['orderType'] = 'LIMIT'
+                        new_bet['limitOrder'] = {
+                            'size': bet['stake'],
+                            'price': bet['price'],
+                            'persistenceType': 'PERSIST'
+                            }
+                        market_bets[market_id]['bets'].append(new_bet)
 
-    
+        return market_bets
+
+    #Function: Loops through market and places bets
+    def place_bets(self, market_bets = None):
+        for market_id in market_bets:
+            bets = market_bets[market_id]['bets']
+            if bets:
+                #update and check bet count
+                new_betcount = len(bets)
+                self.update.betcount(new_betcount)
+                betcount = self.get_betcount()#total bets placed in crrnt hr
+                if betcount >= setting.max_transactions: return
+                market_path = market_bets[market_id]['market_path']
+                msg = 'MARKET PATH: %s\n' % market_path
+                msg += 'PLACING %s BETS ...\n' % len(bets)
+                for i, bet in enumerate(bets):
+                    msg += '%s: %s\n' % (i, bet)
+                self.logger.xprint(msg)
+                self.do_throttle()
+                resp = self.api.place_bets(market_id, bets)
+                if (type(resp) is dict and 'status' in resp):
+                    if resp['status'] == 'SUCCESS':
+                        #add to ignores
+                        self.update_ignores(market_id)
+                        msg = 'PLACE BETS: SUCCESS'
+                        self.logger.xprint(msg)
+                    else:
+                        if resp['errorCode'] == 'INSUFFICIENT_FUNDS':
+                            msg = 'PLACE BETS: FAIL (%s)' % resp['errorCode']
+                            self.logger.xprint(msg)
+                            sleep(180)
+                        else:
+                            msg = 'PLACE BETS: FAIL (%s)' % resp['errorCode']
+                            self.logger.xprint(msg, True)
+                            self.update_ignores(market_id)
+                else:
+                    msg = 'PLACE BETS: FAIL\n%s' % resp
+                    raise Exception(msg)
+        
+
+    #Function: Returns list of path matching filters specified in settings.py
+    def filter_menu_path(self, menu_paths = None):
+        #@menu_paths: dict of menu paths
+        keepers = {}
+        for market_id in menu_paths:
+            market_path = menu_paths[market_id]
+            path_texts = market_path.split('/')
+            for filter_index, filter in enumerate(settings.menu_filters):
+                #check if all search text matches this market
+                matched_all = False
+                for text in filter:
+                    if text in path_texts:
+                        matched_all = True
+                    else:
+                        matched_all = False
+                        break
+                    #keep this market
+                    if matched_all:
+                        keepers[market_id] = {
+                            'bets_index': filter_index
+                            'market_path': market_path
+                            }
+        return keepers
+
+
+    def run(self, username='', password='', app_key='', aus= False):
+        #create the API object
+        self.username = username
+        self.api = API(aus, ssl_prefix = username)
+        self.api.app_key = app_key
+        self.logger = Logger(aus)
+        self.logger.bot_version = __version__
+        #login to betfair api-ng
+        self.do_login(username, password)
+        while self.session:
+            self.do_throttle()
+            self.keep_alive() #refresh login session every 15 mins
+            #check bet count
+            betcount = self.get_betcount()
+            if betcount < settings.max_transactions:
+                #get menu path and filter
+                all_menu_paths = self.api.get_menu_paths(self.ignores)
+                market_paths = self.filter_menu_path(all_menu_paths)
+                #get markets (req'd to get selection ids for runners)
+                market_ids = list(market_paths.keys())
+                markets = self.get_markets(market_ids) #max size = 1000
+                if markets:
+                    msg = 'FOUND %S NEW MARKETS ...' % len(markets)
+                    self.logger.xprint(msg)
+                    # create bets
+                    all_bets = self.create_bets(markets, market_paths)
+                    #place bets
+                    self.place_bets(all_bets)
+                else:
+                    # bet count limit reached for this hour
+                    utcnow = datetime.utcnow()
+                    nextdate = utcnow + timedelta(hours=1)
+                    nextdate = datetime(nextdate.year, nextdate.month, nextdate.day, nextdate.hour)
+                    wait = (nextdate - utcnow).total_seconds()
+                    if wait > 0:
+                        mins, secs = divmod(wait, 60)
+                        msg = 'WARNING: TRANSACTION LIMIT REACHED FOR CURRENT HOUR\n'
+                        msg += 'Sleeping for %dm %ds' % (mins, secs)
+                        self.logger.xprint(msg)
+                        #wait until next hour, keeping session alive
+                        time_target = time() + wait
+                        while time() < time_target:
+                            self.keep_alive() #refresh login sessuib (runs every 15 mins)
+                            sleep(0.5) #CPU saver!
+                if not self.session:
+                    msg = 'SESSION TIMEOUT'
+                    raise Exception(msg)
     
 #Testing Object Initialization
-USERNAME = login_info['username']
-PASSWORD = login_info['password']
-APP_KEY = login_info['app_key_live']
-AUS = False
-log = Logger(AUS)
-log.xprint("Testing Bot")
-soccer_bot = SoccerBot()
-print(soccer_bot.abs_path)
-print(soccer_bot.betcount_path)
-print(soccer_bot.throttle)
-print(soccer_bot.betcount)
-print(soccer_bot.ignores)
+
+
+
 
